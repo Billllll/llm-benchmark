@@ -74,10 +74,48 @@ def run_benchmark(
         print("System Error: No response received from ollama")
         return None
 
-    # with open("data/ollama/ollama_res.json", "w") as outfile:
-    #     outfile.write(json.dumps(last_element, indent=4))
-
-    return OllamaResponse.model_validate(last_element)
+    # Convert response to dictionary if it's not already
+    try:
+        if not isinstance(last_element, dict):
+            # Convert ChatResponse object to dict
+            response_dict = {
+                "model": last_element.model,
+                "created_at": datetime.now(),
+                "message": {
+                    "role": last_element.message.role,
+                    "content": last_element.message.content,
+                },
+                "done": True,
+                "total_duration": getattr(last_element, "total_duration", 0),
+                "load_duration": getattr(last_element, "load_duration", 0),
+                "prompt_eval_count": getattr(last_element, "prompt_eval_count", 0),
+                "prompt_eval_duration": getattr(last_element, "prompt_eval_duration", 0),
+                "eval_count": getattr(last_element, "eval_count", 0),
+                "eval_duration": getattr(last_element, "eval_duration", 0),
+            }
+            return OllamaResponse.model_validate(response_dict)
+        return OllamaResponse.model_validate(last_element)
+    except Exception as e:
+        print(f"Error processing response: {str(e)}")
+        print(f"Response type: {type(last_element)}")
+        print(f"Response content: {last_element}")
+        
+        # Create a fallback response with minimal data
+        fallback = OllamaResponse(
+            model=model_name,
+            created_at=datetime.now(),
+            message=Message(
+                role="assistant",
+                content=getattr(last_element.message, "content", "Unknown response") if hasattr(last_element, "message") else "Unknown response"
+            ),
+            done=True,
+            total_duration=0,
+            prompt_eval_count=0,
+            prompt_eval_duration=0,
+            eval_count=0,
+            eval_duration=0
+        )
+        return fallback
 
 
 def nanosec_to_sec(nanosec):
@@ -183,17 +221,28 @@ def main():
         ],
         help="List of prompts to use for benchmarking. Separate multiple prompts with spaces.",
     )
+    parser.add_argument(
+        "-m",
+        "--model",
+        type=str,
+        help="Specify a single model to benchmark instead of all models.",
+    )
 
     args = parser.parse_args()
 
     verbose = args.verbose
     skip_models = args.skip_models
     prompts = args.prompts
+    specific_model = args.model
     print(
         f"\nVerbose: {verbose}\nSkip models: {skip_models}\nPrompts: {prompts}"
+        + (f"\nSpecific model: {specific_model}" if specific_model else "")
     )
 
-    model_names = get_benchmark_models(skip_models)
+    if specific_model:
+        model_names = [specific_model]
+    else:
+        model_names = get_benchmark_models(skip_models)
     benchmarks = {}
 
     for model_name in model_names:
